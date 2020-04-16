@@ -142,7 +142,7 @@ class debugger():
             print('[*] Calling kernel32.DebugActiveProcess - ',pid)
             self.debugger_active    =   True
             self.pid                =   int(pid)
-            self.run()          #   update #1       is to remove this call
+            #self.run()          #   update #1       is to remove this call
                                 #   BUT: if i remove it the process & the debugger exit
         else:
             print("[*] Unable to attach to the process")
@@ -170,7 +170,7 @@ class debugger():
 
 
             #   This line creates an infinite loop:
-            print('[*] Calling kernel32.ContinueDebugEvent')
+            #print('[*] Calling kernel32.ContinueDebugEvent')
             kernel32.ContinueDebugEvent(
                 debug_event.dwProcessId,
                 debug_event.dwThreadId,
@@ -189,3 +189,88 @@ class debugger():
         else:
             print("there was an error")
             return False
+
+
+    #   Obtaining CPU Register State
+    #
+    #       #   1. Obtain a handle to the currently executing thread in the debuggee
+    #
+    #                   OpenThread()
+
+                        # HANDLE WINAPI OpenThread(
+                        #     DWORD dwDesiredAccess,
+                        #     BOOL bInheritHandle,              #   sister func to OpenProcess()
+                        #     DWORD dwThreadId                  #   <- Process ID everything else is the same
+                        # );
+    #                                                           #   except this one takes a thread Identifier
+    #       #   - Obtain a list of all the threads currently executing inside the process
+    #       #   - select the thread we want
+    #       #   - obtain a valid handle using OpenThread()
+    def open_thread(self, thread_id):
+        print('open_thread')
+
+        h_thread = kernel32.OpenThread(THREAD_ALL_ACCESS, None, thread_id)
+
+        if h_thread is not None:
+            return h_thread
+        else:
+            print('[*] Could not obtain a valid thread handle.')
+            return False
+
+
+    def enumerate_threads(self, thread_id=None, h_thread=None):
+        
+
+
+        print('enumerate_threads')
+
+        thread_entry = THREADENTRY32()
+        thread_list = []
+        snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, self.pid)
+
+        if snapshot is not None:
+            #   Have to set size of the struct
+            #   or the call will fail
+            thread_entry.dwSize = sizeof(thread_entry)
+            success = kernel32.Thread32First(snapshot, byref(thread_entry))     #   pass obj THREADENTRY32 by reference
+
+                            # contains relevant info for the first thread that was
+                            #                                             found.
+
+
+                            #                                             typedef struct THREADENTRY32 {
+                            #                                                 DWORD dwSize;                       <-----
+                            #                                                 DWORD cntUsage;
+                            #                                                 DWORD th32ThreadID;                 <-----
+                            #                                                 DWORD th32OwnerProcessID;           <-----
+                            #                                                 LONG tpBasePri;
+                            #                                                 LONG tpDeltaPri;
+                            #                                                 DWORD dwFlags;
+                            #                                             };
+            while success:
+                if thread_entry.th32OwnerProcessID == self.pid:
+                    thread_list.append(thread_entry.th32ThreadID)
+                success = kernel32.Thread32Next(snapshot, byref(thread_entry))
+
+            kernel32.CloseHandle(snapshot)
+            return thread_list
+        else:
+            return False
+
+
+    def get_thread_context(self, thread_id=None, h_thread=None):
+
+        print('get_thread_Context')
+        context = CONTEXT()
+        context.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS
+
+        #   Obtain a handle to the thread
+        if not h_thread:
+            self.open_thread(thread_id)
+
+        if kernel32.GetThreadContext(h_thread, byref(context)):     #   if it actually retrieves Context of the thread, just close
+            kernel32.CloseHandle(h_thread)
+            return context
+        else:
+            return False    #None                                   #   @TODO it jumps here -> 64 bit?! https://stackoverflow.com/a/18622123
+                                                                                                #       https://stackoverflow.com/a/18814507
